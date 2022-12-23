@@ -1,115 +1,136 @@
-import re 
-import tweepy 
-from tweepy import OAuthHandler 
-from textblob import TextBlob 
+import re
+import tweepy
+from tweepy import OAuthHandler
+from textblob import TextBlob
 from textblob.sentiments import NaiveBayesAnalyzer
 
-from flask import Flask, render_template , redirect, url_for, request
+from flask import Flask, render_template, redirect, url_for, request
+
+import emoji
+import pandas as pd
 
 
+def clean_tweet(tweet):
+    return ' '.join(re.sub("(@[A-Za-z0-9]+)|([^0-9A-Za-z \t]) |(\w+:\/\/\S+)", " ", tweet).split())
 
-def clean_tweet( tweet): 
 
-        return ' '.join(re.sub("(@[A-Za-z0-9]+)|([^0-9A-Za-z \t]) |(\w+:\/\/\S+)", " ", tweet).split()) 
-         
-def get_tweet_sentiment( tweet): 
-        
-        # analysis = TextBlob(clean_tweet(tweet), analyzer=NaiveBayesAnalyzer()) 
+def get_tweet_sentiment(tweet):
+    # analysis = TextBlob(clean_tweet(tweet), analyzer=NaiveBayesAnalyzer())
 
-        # if analysis.sentiment.classification == "pos": 
-        #     return 'positive'
-        # elif analysis.sentiment.classification == "neg": 
-        #     return 'negative'
+    # if analysis.sentiment.classification == "pos":
+    #     return 'positive'
+    # elif analysis.sentiment.classification == "neg":
+    #     return 'negative'
 
-        analysis = TextBlob(clean_tweet(tweet)) 
-        if analysis.sentiment.polarity > 0:
-            return "positive"
-        elif analysis.sentiment.polarity == 0:
-            return "neutral"
+    analysis = TextBlob(clean_tweet(tweet))
+    if analysis.sentiment.polarity > 0:
+        return "positive"
+    elif analysis.sentiment.polarity == 0:
+        return "neutral"
+    else:
+        return "negative"
+
+
+def get_tweets(api, query, c):
+    count = int(c)
+    tweets = []
+    tweets = api.user_timeline(screen_name=query, count=count,
+                               tweet_mode='extended')
+
+    # create DataFrame
+    m = []
+    columns = ['User', 'Tweet']
+    data = []
+    x = []
+    for tweet in tweets:
+        j = emoji.demojize(tweet.full_text)
+
+        data.append([tweet.user.screen_name, j])
+        x.append(j)
+
+    df = pd.DataFrame(data, columns=columns)
+
+    po = ne = n = 0 # positive, negative, neutral variable =0
+    for text in x:
+        blob = TextBlob(text)
+        key = text
+        if blob.sentiment.polarity > 0:
+            text_sentiment = "positive"
+            po += 1
+
+        elif blob.sentiment.polarity == 0:
+            text_sentiment = "neutral"
+            ne += 1
         else:
-            return "negative"
+            text_sentiment = "negative"
+            n += 1
+        sentiment = text_sentiment
+        m.append({"text": key, "sentiment": sentiment})
+    return m  # returning nested dictionary
 
 
-def get_tweets(api, query, count=5): 
-        
-        count = int(count)
-        tweets = [] 
-        try: 
-            
-            fetched_tweets = tweepy.Cursor(api.search_tweets, q=query, lang ='en', tweet_mode='extended').items(count)
-            
-            for tweet in fetched_tweets: 
-                
-                parsed_tweet = {} 
-
-                if 'retweeted_status' in dir(tweet):
-                    parsed_tweet['text'] = tweet.retweeted_status.full_text
-                else:
-                    parsed_tweet['text'] = tweet.full_text
-
-                parsed_tweet['sentiment'] = get_tweet_sentiment(parsed_tweet['text']) 
-
-                if tweet.retweet_count > 0: 
-                    if parsed_tweet not in tweets: 
-                        tweets.append(parsed_tweet) 
-                else: 
-                    tweets.append(parsed_tweet) 
-            return tweets 
-        except tweepy.TweepyException as e: 
-            print("Error : " + str(e)) 
 
 app = Flask(__name__)
 app.static_folder = 'static'
 
+
 @app.route('/')
 def home():
-  return render_template("index.html")
+    return render_template("index.html")
+
+@app.route('/psychometric')
+def psychometric():
+  return render_template("psychometric.html")
+
+
+@app.route('/wellbeing')
+def wellbeing():
+  return render_template("wellbeing.html")
+
+
+
 
 # ******Phrase level sentiment analysis
-@app.route("/predict", methods=['POST','GET'])
+@app.route("/predict", methods=['POST', 'GET'])
 def pred():
-	if request.method=='POST':
-            query=request.form['query']
-            count=request.form['num']
-            fetched_tweets = get_tweets(api,query, count) 
-            return render_template('result.html', result=fetched_tweets)
+    if request.method == 'POST':
+        query = request.form['query']
+        count = request.form['num']
+        fetched_tweets = get_tweets(api, query, count)
+        return render_template('result.html', result=fetched_tweets)
+
 
 # fetched_tweets
-# [
-#   {"text" : "tweet1", "sentiment" : "sentiment1"},
-#   {"text" : "tweet2", "sentiment" : "sentiment2"},
-#   {"text" : "tweet3", "sentiment" : "sentiment3"}
-# ]
+
 
 # *******Sentence level sentiment analysis
-@app.route("/predict1", methods=['POST','GET'])
+@app.route("/predict1", methods=['POST', 'GET'])
 def pred1():
-	if request.method=='POST':
-            text = request.form['txt']
-            blob = TextBlob(text)
-            if blob.sentiment.polarity > 0:
-                text_sentiment = "positive"
-            elif blob.sentiment.polarity == 0:
-                text_sentiment = "neutral"
-            else:
-                text_sentiment = "negative"
-            return render_template('result1.html',msg=text, result=text_sentiment)
+    if request.method == 'POST':
+        text = request.form['txt']
+        blob = TextBlob(text)
+        if blob.sentiment.polarity > 0:
+            text_sentiment = "positive"
+        elif blob.sentiment.polarity == 0:
+            text_sentiment = "neutral"
+        else:
+            text_sentiment = "negative"
+        return render_template('result1.html', msg=text, result=text_sentiment)
 
 
 if __name__ == '__main__':
-    
-    consumer_key = 'EwG6T8KZTCuSfv6Wy2rfUu1gO' 
-    consumer_secret = 'R8dREd4HyxY6flL3OOHktuEfkTAXj66HZ5QGWGUsmoKfcaNhND'
-    access_token = '405461195-HdMbZqc7YmMP5yTMG5rix5nrahxGP72WG9VjF6w1'
-    access_token_secret = '9Zl6g93TtRvH3voFlOd6pbDwFGZ5A7YLDJnogrkm1O0NT'
 
-    try: 
-        auth = OAuthHandler(consumer_key, consumer_secret)  
-        auth.set_access_token(access_token, access_token_secret) 
+    consumerKey = "kyRQF7cFHe4qgecZG0knT26xM"
+    consumerSecret = "ksQcnURKquWNOeiq1NBUmRvF1Q3mntwK5GS1Z8idP55s9R5F9j"
+    accessToken = "1574783882091642880-xDPEEHEYJp1I7PVuoVdYSJjqdlh2Ct"
+    accessTokenSecret = "sKCjx2Q3iGlIg1FctYGbLdpy5jgDGkpIbIyNwgruhuMQo"
+
+    try:
+        auth = tweepy.OAuthHandler(consumerKey, consumerSecret)
+        auth.set_access_token(accessToken, accessTokenSecret)
         api = tweepy.API(auth)
-    except: 
-        print("Error: Authentication Failed") 
+    except:
+        print("Error: Authentication Failed")
 
-    app.debug=True
+    app.debug = True
     app.run(host='localhost')
-
